@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 from dotenv import load_dotenv, set_key
 
-__version__ = '0.1.3'  # Update this version as needed - 'major.minor.patch'
+__version__ = '0.1.4'  # Update this version as needed - 'major.minor.patch'
 GITHUB_OWNER = 'DaSonOfPoseidon'
 GITHUB_REPO = 'CalendarBuddy'
 
@@ -31,6 +31,9 @@ APPS = {
     'ConsultationCrusher': {
         'label': 'Run Tasks',
         'repo': ('DaSonOfPoseidon', 'TaskScraper'),
+    },
+    'Updater': {
+        'repo': ('DaSonOfPoseidon', 'CalendarBuddy'),
     },
 }
 
@@ -74,6 +77,19 @@ def download_update(url, dest_path):
         print(f"[Update] Failed to download update: {e}")
         return False
 
+def ensure_updater_installed(bin_dir):
+    updater_path = os.path.join(bin_dir, "Updater.exe")
+    if not os.path.isfile(updater_path):
+        tag, url = get_latest_release_info("Updater")
+        if tag and url:
+            os.makedirs(bin_dir, exist_ok=True)
+            if download_update(url, updater_path):
+                print(f"[Setup] Updater.exe v{tag} installed")
+            else:
+                print("[Setup] Failed to download Updater.exe")
+        else:
+            print("[Setup] No Updater.exe asset found")
+
 def maybe_update(app_name, current_version, is_launcher=False):
     latest_version, download_url = get_latest_release_info(app_name)
     if not latest_version or not download_url:
@@ -81,45 +97,58 @@ def maybe_update(app_name, current_version, is_launcher=False):
         return
 
     def norm_ver(v): return v.lstrip('vV')
-
     if norm_ver(latest_version) <= norm_ver(current_version):
         print(f"[No Update] {app_name} is up to date ({current_version})")
         return
 
     print(f"[Update] {app_name} update available: {current_version} → {latest_version}")
 
+    # compute paths
     app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
     bin_folder = os.path.join(app_dir, "bin")
     os.makedirs(bin_folder, exist_ok=True)
 
     if is_launcher:
-        old_exe_path = os.path.join(app_dir, f"{app_name}.exe")
-        new_exe_path = os.path.join(app_dir, f"{app_name}_update.exe")
-        updater_path = os.path.join(bin_folder, "Updater.exe")
+        old_exe = os.path.join(app_dir, f"{app_name}.exe")
+        new_exe = os.path.join(app_dir, f"{app_name}_update.exe")
     else:
-        old_exe_path = os.path.join(bin_folder, f"{app_name}.exe")
-        new_exe_path = os.path.join(bin_folder, f"{app_name}_update.exe")
-        updater_path = os.path.join(bin_folder, "Updater.exe")
+        old_exe = os.path.join(bin_folder, f"{app_name}.exe")
+        new_exe = os.path.join(bin_folder, f"{app_name}_update.exe")
 
-    if download_update(download_url, new_exe_path):
-        print(f"[Update] Downloaded new version to {new_exe_path}")
-        if not os.path.exists(updater_path):
-            print(f"[Update] Updater.exe not found in {bin_folder}, cannot update now.")
-            return
+    updater = os.path.join(bin_folder, "Updater.exe")
+
+    # download the new EXE
+    if not download_update(download_url, new_exe):
+        print("[Update] Failed to download update")
+        return
+
+    print(f"[Update] Downloaded new version to {new_exe}")
+    if not os.path.exists(updater):
+        print(f"[Update] Updater.exe not found in {bin_folder}, cannot update now.")
+        return
+
+    if is_launcher:
+        # 1) Launch updater *without waiting*
+        print(f"[Update] Launching Updater.exe to replace {old_exe}")
+        subprocess.Popen(
+            [updater, old_exe, new_exe],
+            cwd=bin_folder
+        )
+        # 2) Exit immediately so Windows unlocks CalendarBuddy.exe
+        print("[Update] Exiting launcher to allow update")
+        sys.exit(0)
+    else:
+        # child-EXE: it's not running, so we can safely wait
         try:
-            print(f"[Update] Launching Updater.exe to replace {old_exe_path}")
-            subprocess.run([updater_path, old_exe_path, new_exe_path], check=True)
-
+            print(f"[Update] Launching Updater.exe to replace {old_exe}")
+            subprocess.run(
+                [updater, old_exe, new_exe],
+                cwd=bin_folder,
+                check=True
+            )
             print(f"[Update] Replacement complete for {app_name}")
-
-            if is_launcher:
-                print("[Update] Restarting launcher")
-                subprocess.Popen([old_exe_path])
-                sys.exit(0)
         except Exception as e:
             print(f"[Update] Error running Updater.exe: {e}")
-    else:
-        print("[Update] Failed to download update")
 # ────────────────────────────────────────────────────────────────────────────────
 
 # ─── APPLICATION DIRECTORY ─────────────────────────────────────────────────────
@@ -130,6 +159,7 @@ else:
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     RESOURCE_DIR = APP_DIR
 MISC_DIR     = os.path.join(APP_DIR, "Misc")
+BIN_DIR = os.path.join(APP_DIR, "bin")
 ENV_PATH    = os.path.join(MISC_DIR, '.env')
 INTERPRETER = os.path.join(RESOURCE_DIR, 'embedded_python', 'python.exe') #unneeded, but kept for backwards compatibility
 if not os.path.isfile(INTERPRETER):
@@ -347,7 +377,7 @@ def get_child_version(exe_path, timeout=30):
 
 
 if __name__ == '__main__':
-    # Self-update the launcher itself
+    ensure_updater_installed(BIN_DIR)
     maybe_update('CalendarBuddy', __version__, True)
     root = tk.Tk()
     App(root)
