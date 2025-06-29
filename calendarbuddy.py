@@ -47,14 +47,12 @@ def download_update(url, dest_path):
         print(f"[Update] Failed to download update: {e}")
         return False
 
-
 def maybe_update(app_name, current_version, is_launcher=False):
     latest_version, download_url = get_latest_release_info(app_name)
     if not latest_version or not download_url:
         print(f"[Update] Could not find latest release info for {app_name}")
         return
 
-    # Normalize version strings (strip leading 'v' if present)
     def norm_ver(v): return v.lstrip('vV')
 
     if norm_ver(latest_version) <= norm_ver(current_version):
@@ -62,27 +60,37 @@ def maybe_update(app_name, current_version, is_launcher=False):
         return
 
     print(f"[Update] {app_name} update available: {current_version} → {latest_version}")
-    # Download update to temp file
+
     app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
-    new_exe_path = os.path.join(app_dir, f"{app_name}_update.exe")
+    bin_folder = os.path.join(app_dir, "bin")
+    os.makedirs(bin_folder, exist_ok=True)
+
+    if is_launcher:
+        old_exe_path = os.path.join(app_dir, f"{app_name}.exe")
+        new_exe_path = os.path.join(app_dir, f"{app_name}_update.exe")
+        updater_path = os.path.join(bin_folder, "Updater.exe")
+    else:
+        old_exe_path = os.path.join(bin_folder, f"{app_name}.exe")
+        new_exe_path = os.path.join(bin_folder, f"{app_name}_update.exe")
+        updater_path = os.path.join(bin_folder, "Updater.exe")
+
     if download_update(download_url, new_exe_path):
         print(f"[Update] Downloaded new version to {new_exe_path}")
-
-        # Launch updater helper and exit, or replace directly if safe
-        # Here, simple direct replacement logic (WARNING: might fail on Windows if exe is running)
-        old_exe_path = os.path.join(app_dir, f"{app_name}.exe")
-
+        if not os.path.exists(updater_path):
+            print(f"[Update] Updater.exe not found in {bin_folder}, cannot update now.")
+            return
         try:
-            # Replace old exe with new exe - Windows might lock file if running, so this may fail
-            os.replace(new_exe_path, old_exe_path)
-            print(f"[Update] Replaced {old_exe_path} with new version")
+            print(f"[Update] Launching Updater.exe to replace {old_exe_path}")
+            subprocess.run([updater_path, old_exe_path, new_exe_path], check=True)
+
+            print(f"[Update] Replacement complete for {app_name}")
+
             if is_launcher:
                 print("[Update] Restarting launcher")
                 subprocess.Popen([old_exe_path])
                 sys.exit(0)
         except Exception as e:
-            print(f"[Update] Could not replace executable directly: {e}")
-            # Fallback: you would implement a separate updater helper exe here
+            print(f"[Update] Error running Updater.exe: {e}")
     else:
         print("[Update] Failed to download update")
 # ────────────────────────────────────────────────────────────────────────────────
@@ -117,7 +125,7 @@ load_dotenv(ENV_PATH)
 class App:
     def __init__(self, root):
         self.root = root
-        root.title('CalendarBuddy Launcher')
+        root.title(f'CalendarBuddy Launcher v{__version__}')
         self.buttons = {}
 
         # Settings frame
@@ -146,7 +154,15 @@ class App:
         save_btn.grid(row=3, column=0, columnspan=2, pady=5)
 
         tk.Label(root, text='Select a program to run:').pack(pady=(10, 0))
-        for label in JOB_MAP:
+
+        labels = [
+            "Run Assigner",
+            "Run Scraper",
+            "Run Spreader",
+            "Run Tasks"
+        ]
+
+        for label in labels:
             btn = tk.Button(root, text=label, width=25,
                             command=lambda l=label: self.start_task(l))
             btn.pack(pady=5)
@@ -187,9 +203,9 @@ class App:
         (messagebox.showinfo if success else messagebox.showerror)('Result', message)
 
     def write_log(self, label, message):
-        repo_name = JOB_MAP[label][0]
-        log_file  = os.path.join(LOGS_DIR, f"{repo_name.lower()}.log")
-        ts        = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        safe_label = label.replace(" ", "_").lower()
+        log_file = os.path.join(LOGS_DIR, f"{safe_label}.log")
+        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"[{ts}] {label}\n{message}\n\n")
 
@@ -211,7 +227,7 @@ def run_job(label):
     # Build the path to the child EXE
     app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
     exe_name = f"{exe_base}.exe"
-    exe_path = os.path.join(app_dir, exe_name)
+    exe_path = os.path.join(app_dir, "bin" , exe_name)
 
     # 1) Get current version by calling the EXE with --version
     current_version = get_child_version(exe_path)

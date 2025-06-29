@@ -1,0 +1,14 @@
+pyinstaller
+python-dotenv
+playwright
+pandas
+numpy
+openpyxl
+requests
+tkcalendar
+tkinterdnd2
+RapidFuzz
+python-dateutil
+pytz
+tzdata
+tqdm
