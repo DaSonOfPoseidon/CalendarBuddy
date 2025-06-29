@@ -10,30 +10,31 @@ import tkinter as tk
 from tkinter import messagebox
 from dotenv import load_dotenv, set_key
 
-__version__ = '0.1.0'  # Update this version as needed - 'major.minor.patch'
+__version__ = '0.1.1'  # Update this version as needed - 'major.minor.patch'
 GITHUB_OWNER = 'DaSonOfPoseidon'
 GITHUB_REPO = 'CalendarBuddy'
 
 def get_latest_release_info(app_name):
     """
     Fetch latest GitHub release data and return (tag_name, download_url) for matching asset.
-    Assumes assets are named like app_name_version.exe, e.g. ASSigner_v0.1.0.exe
+    This version fetches from the 'exeFiles' repo where your built .exes are stored.
     """
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+    EXE_REPO_OWNER = "DaSonOfPoseidon"
+    EXE_REPO_NAME = "exeFiles"
+    url = f"https://api.github.com/repos/{EXE_REPO_OWNER}/{EXE_REPO_NAME}/releases/latest"
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         tag_name = data.get('tag_name')
-        # Find asset matching app_name
         assets = data.get('assets', [])
         for asset in assets:
             name = asset.get('name', '')
-            if name.lower().startswith(app_name.lower()):
+            if name.lower() == app_name.lower():
                 return tag_name, asset.get('browser_download_url')
-        print(f"[Update] No asset found for {app_name} in latest release")
+        print(f"[Update] No asset named '{app_name}' found in exeFiles latest release")
     except Exception as e:
-        print(f"[Update] Error fetching latest release info: {e}")
+        print(f"[Update] Error fetching latest release info from exeFiles repo: {e}")
     return None, None
 
 def download_update(url, dest_path):
