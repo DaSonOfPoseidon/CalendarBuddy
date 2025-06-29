@@ -3,6 +3,7 @@ import os
 import subprocess
 import threading
 import datetime
+import json
 import requests
 import shutil
 import tempfile
@@ -10,31 +11,56 @@ import tkinter as tk
 from tkinter import messagebox
 from dotenv import load_dotenv, set_key
 
-__version__ = '0.1.1'  # Update this version as needed - 'major.minor.patch'
+__version__ = '0.1.3'  # Update this version as needed - 'major.minor.patch'
 GITHUB_OWNER = 'DaSonOfPoseidon'
 GITHUB_REPO = 'CalendarBuddy'
 
-def get_latest_release_info(app_name):
+APPS = {
+    'ASSigner': {
+        'label': 'Run Assigner',
+        'repo': ('DaSonOfPoseidon', 'JobAssignment'),
+    },
+    'JobScraper': {
+        'label': 'Run Scraper',
+        'repo': ('DaSonOfPoseidon', 'JobScraper'),
+    },
+    'ButterKnife': {
+        'label': 'Run Spreader',
+        'repo': ('DaSonOfPoseidon', 'JobScraper'),
+    },
+    'ConsultationCrusher': {
+        'label': 'Run Tasks',
+        'repo': ('DaSonOfPoseidon', 'TaskScraper'),
+    },
+}
+
+def get_latest_release_info(app_name: str):
     """
-    Fetch latest GitHub release data and return (tag_name, download_url) for matching asset.
-    This version fetches from the 'exeFiles' repo where your built .exes are stored.
+    Given an app_name (e.g. 'ASSigner' or 'CalendarBuddy'),
+    look up its GitHub repo in APPS (or use the launcher repo if missing),
+    then fetch /releases/latest and return (tag, download_url) for the first
+    .exe whose base name starts with app_name.
     """
-    EXE_REPO_OWNER = "DaSonOfPoseidon"
-    EXE_REPO_NAME = "exeFiles"
-    url = f"https://api.github.com/repos/{EXE_REPO_OWNER}/{EXE_REPO_NAME}/releases/latest"
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        tag_name = data.get('tag_name')
-        assets = data.get('assets', [])
-        for asset in assets:
-            name = asset.get('name', '')
-            if name.lower() == app_name.lower():
-                return tag_name, asset.get('browser_download_url')
-        print(f"[Update] No asset named '{app_name}' found in exeFiles latest release")
-    except Exception as e:
-        print(f"[Update] Error fetching latest release info from exeFiles repo: {e}")
+    # pick the right repo tuple
+    owner, repo = APPS.get(app_name, {}).get('repo', (GITHUB_OWNER, GITHUB_REPO))
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    headers = {}
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    resp = requests.get(url, headers=headers, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    tag_name = data.get("tag_name")
+
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        base, ext = os.path.splitext(name)
+        if ext.lower() == ".exe" and base.lower().startswith(app_name.lower()):
+            return tag_name, asset["browser_download_url"]
+
     return None, None
 
 def download_update(url, dest_path):
@@ -103,8 +129,8 @@ if getattr(sys, 'frozen', False):
 else:
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     RESOURCE_DIR = APP_DIR
-
-ENV_PATH    = os.path.join(APP_DIR, '.env')
+MISC_DIR     = os.path.join(APP_DIR, "Misc")
+ENV_PATH    = os.path.join(MISC_DIR, '.env')
 INTERPRETER = os.path.join(RESOURCE_DIR, 'embedded_python', 'python.exe') #unneeded, but kept for backwards compatibility
 if not os.path.isfile(INTERPRETER):
     INTERPRETER = sys.executable
@@ -114,6 +140,9 @@ BRANCH = 'main'
 
 LOGS_DIR    = os.path.join(APP_DIR, 'logs')
 PYCACHE_DIR = os.path.join(LOGS_DIR, 'pycache')
+
+os.makedirs(MISC_DIR, exist_ok=True)
+VERSION_FILE = os.path.join(MISC_DIR, "versions.json")
 os.makedirs(PYCACHE_DIR, exist_ok=True)
 os.environ['PYTHONPYCACHEPREFIX'] = PYCACHE_DIR
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -210,55 +239,95 @@ class App:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"[{ts}] {label}\n{message}\n\n")
 
+def load_versions():
+    """Load the per-app version cache from Misc/versions.json."""
+    try:
+        with open(VERSION_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-def run_job(label):
-    # Determine the child EXE name and path
-    # Suppose you have a map from label to exe-base-name:
-    APP_NAME_MAP = {
-        'Run Assigner': 'ASSigner',
-        'Run Scraper': 'JobScraper',
-        'Run Spreader': 'ButterKnife',
-        'Run Tasks': 'ConsultationCrusher',
-    }
-    exe_base = APP_NAME_MAP.get(label)
-    if not exe_base:
-        print(f"[Error] Unknown label: {label}")
-        return
+def save_versions(versions):
+    """Save the per-app version cache to Misc/versions.json."""
+    try:
+        with open(VERSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(versions, f, indent=2)
+    except Exception as e:
+        print(f"[Cache] Failed to write {VERSION_FILE}: {e}")
 
-    # Build the path to the child EXE
-    app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
-    exe_name = f"{exe_base}.exe"
-    exe_path = os.path.join(app_dir, "bin" , exe_name)
-
-    # 1) Get current version by calling the EXE with --version
-    current_version = get_child_version(exe_path)
-    if current_version is None:
-        print(f"[Update] Could not determine version for {exe_name}, skipping update check.")
+def run_job(label) -> str:
+    # 1) Map label → app_name
+    for app_name, meta in APPS.items():
+        if meta["label"] == label:
+            break
     else:
-        # 2) Check for update
-        maybe_update(exe_base, current_version)
+        return f"[Error] Unknown label: {label}"
 
-    # 3) Launch the child EXE as subprocess
-    if os.path.isfile(exe_path):
-        try:
-            # Launch without waiting; detach from launcher if desired
-            subprocess.Popen([exe_path], cwd=app_dir)
-        except Exception as e:
-            print(f"[Launch] Failed to run {exe_name}: {e}")
+    # 2) Paths
+    app_dir = (
+        os.path.dirname(sys.executable)
+        if getattr(sys, "frozen", False)
+        else os.path.dirname(__file__)
+    )
+    bin_dir = os.path.join(app_dir, "bin")
+    exe_name = f"{app_name}.exe"
+    exe_path = os.path.join(bin_dir, exe_name)
+
+    # 3) Load or init version cache
+    versions = load_versions()
+
+    # 4) Download if missing, update cache
+    downloaded_tag = None
+    if not os.path.isfile(exe_path):
+        tag, url = get_latest_release_info(app_name)
+        if tag and url:
+            os.makedirs(bin_dir, exist_ok=True)
+            if download_update(url, exe_path):
+                print(f"[Download] {exe_name} v{tag} → {exe_path}")
+                downloaded_tag = tag
+                versions[app_name] = tag
+                save_versions(versions)
+            else:
+                return f"[Download] Failed to download {exe_name}"
+        else:
+            return f"[Download] No {exe_name} asset found for {app_name}"
+
+    # 5) Determine current_version
+    if downloaded_tag:
+        current_version = downloaded_tag
     else:
-        print(f"[Launch] Executable not found: {exe_path}")
+        current_version = versions.get(app_name)
+        if current_version is None:
+            current_version = get_child_version(exe_path)
 
-def get_child_version(exe_path, timeout=5):
+    # 6) Self‐update (and refresh cache if it bumped)
+    if current_version:
+        before = current_version
+        maybe_update(app_name, current_version)
+        # check if GitHub has a newer tag
+        latest_tag, _ = get_latest_release_info(app_name)
+        if latest_tag and latest_tag != before:
+            versions[app_name] = latest_tag
+            save_versions(versions)
+    else:
+        print(f"[Update] Could not determine version for {exe_name}, skipping update.")
+
+    # 7) Launch
+    try:
+        subprocess.Popen([exe_path], cwd=app_dir)
+        return f"[Launch] {exe_name} started"
+    except Exception as e:
+        return f"[Launch] Failed to run {exe_name}: {e}"
+
+def get_child_version(exe_path, timeout=30):
     """
     Run `exe_path --version` and return the version string.
-    If it fails, return 0.0.0.
+    If it fails or exe is missing, return None.
     """
     if not os.path.isfile(exe_path):
         print(f"[Version] Executable not found: {exe_path}")
         return None
     try:
-        # Use a small timeout so it doesn't hang
-        # On Windows, subprocess.run with list args is fine:
         result = subprocess.run(
             [exe_path, "--version"],
             capture_output=True,
