@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 from dotenv import load_dotenv, set_key
 
-__version__ = '0.1.4'  # Update this version as needed - 'major.minor.patch'
+__version__ = '0.1.5'  # Update this version as needed - 'major.minor.patch'
 GITHUB_OWNER = 'DaSonOfPoseidon'
 GITHUB_REPO = 'CalendarBuddy'
 
@@ -288,7 +288,7 @@ def save_versions(versions):
 def run_job(label) -> str:
     # 1) Map label → app_name
     for app_name, meta in APPS.items():
-        if meta["label"] == label:
+        if meta.get('label') == label:
             break
     else:
         return f"[Error] Unknown label: {label}"
