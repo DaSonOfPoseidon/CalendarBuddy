@@ -1,3 +1,5 @@
+# Updater.py
+
 import sys
 import time
 import os
@@ -9,7 +11,6 @@ def wait_for_file_unlock(file_path, timeout=30, interval=0.5):
     start_time = time.time()
     while True:
         try:
-            # On Windows, opening a file for writing exclusively locks it.
             # Try opening the file in append mode to test if it's locked.
             with open(file_path, "a"):
                 return True

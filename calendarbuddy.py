@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 from dotenv import load_dotenv, set_key
 
-__version__ = '0.1.6'  # Update this version as needed - 'major.minor.patch'
+__version__ = '0.2.0'  # Update this version as needed - 'major.minor.patch'
 GITHUB_OWNER = 'DaSonOfPoseidon'
 GITHUB_REPO = 'CalendarBuddy'
 
@@ -37,148 +37,41 @@ APPS = {
     },
 }
 
-def get_latest_release_info(app_name: str):
-    """
-    Given an app_name (e.g. 'ASSigner' or 'CalendarBuddy'),
-    look up its GitHub repo in APPS (or use the launcher repo if missing),
-    then fetch /releases/latest and return (tag, download_url) for the first
-    .exe whose base name starts with app_name.
-    """
-    # pick the right repo tuple
-    owner, repo = APPS.get(app_name, {}).get('repo', (GITHUB_OWNER, GITHUB_REPO))
-
-    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-    headers = {}
-    token = os.getenv("GITHUB_TOKEN")
-    if token:
-        headers["Authorization"] = f"token {token}"
-
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    tag_name = data.get("tag_name")
-
-    for asset in data.get("assets", []):
-        name = asset.get("name", "")
-        base, ext = os.path.splitext(name)
-        if ext.lower() == ".exe" and base.lower().startswith(app_name.lower()):
-            return tag_name, asset["browser_download_url"]
-
-    return None, None
-
-def download_update(url, dest_path):
-    try:
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(dest_path, 'wb') as f:
-                shutil.copyfileobj(r.raw, f)
-        return True
-    except Exception as e:
-        print(f"[Update] Failed to download update: {e}")
-        return False
-
-def ensure_updater_installed(bin_dir):
-    updater_path = os.path.join(bin_dir, "Updater.exe")
-    if not os.path.isfile(updater_path):
-        tag, url = get_latest_release_info("Updater")
-        if tag and url:
-            os.makedirs(bin_dir, exist_ok=True)
-            if download_update(url, updater_path):
-                print(f"[Setup] Updater.exe v{tag} installed")
-            else:
-                print("[Setup] Failed to download Updater.exe")
-        else:
-            print("[Setup] No Updater.exe asset found")
-
-def maybe_update(app_name, current_version, is_launcher=False) -> bool:
-    """
-    Returns True if an update was performed (and Updater.exe was run),
-    False otherwise.
-    """
-    latest_version, download_url = get_latest_release_info(app_name)
-    if not latest_version or not download_url:
-        print(f"[Update] Could not find latest release info for {app_name}")
-        return False
-
-    def norm_ver(v): return v.lstrip('vV')
-    if norm_ver(latest_version) <= norm_ver(current_version):
-        print(f"[No Update] {app_name} is up to date ({current_version})")
-        return False
-
-    print(f"[Update] {app_name} update available: {current_version} → {latest_version}")
-
-    app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
-    bin_folder = os.path.join(app_dir, "bin")
-    os.makedirs(bin_folder, exist_ok=True)
-
-    # paths for old/new exe
-    if is_launcher:
-        old_exe = os.path.join(app_dir, f"{app_name}.exe")
-        new_exe = os.path.join(app_dir, f"{app_name}_update.exe")
-    else:
-        old_exe = os.path.join(bin_folder, f"{app_name}.exe")
-        new_exe = os.path.join(bin_folder, f"{app_name}_update.exe")
-
-    updater = os.path.join(bin_folder, "Updater.exe")
-
-    # download the update
-    if not download_update(download_url, new_exe):
-        print("[Update] Failed to download update")
-        return False
-
-    print(f"[Update] Downloaded new version to {new_exe}")
-    if not os.path.exists(updater):
-        print(f"[Update] Updater.exe not found in {bin_folder}, cannot update now.")
-        return False
-
-    if is_launcher:
-        # launcher: fire-and-exit so the file lock is released
-        print(f"[Update] Launching Updater.exe to replace {old_exe}")
-        subprocess.Popen([updater, old_exe, new_exe], cwd=bin_folder)
-        print("[Update] Exiting launcher to allow update")
-        sys.exit(0)
-    else:
-        # child: run updater synchronously and then return True
-        try:
-            print(f"[Update] Launching Updater.exe to replace {old_exe}")
-            subprocess.run([updater, old_exe, new_exe], cwd=bin_folder, check=True)
-            print(f"[Update] Replacement complete for {app_name}")
-            return True
-        except Exception as e:
-            print(f"[Update] Error running Updater.exe: {e}")
-            return False
-# ────────────────────────────────────────────────────────────────────────────────
-
-# ─── APPLICATION DIRECTORY ─────────────────────────────────────────────────────
 if getattr(sys, 'frozen', False):
     APP_DIR = os.path.dirname(sys.executable)
     RESOURCE_DIR = getattr(sys, '_MEIPASS', APP_DIR)
 else:
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
     RESOURCE_DIR = APP_DIR
+
 MISC_DIR     = os.path.join(APP_DIR, "Misc")
-BIN_DIR = os.path.join(APP_DIR, "bin")
-ENV_PATH    = os.path.join(MISC_DIR, '.env')
-INTERPRETER = os.path.join(RESOURCE_DIR, 'embedded_python', 'python.exe') #unneeded, but kept for backwards compatibility
+BIN_DIR      = os.path.join(APP_DIR, "bin")
+LOGS_DIR     = os.path.join(APP_DIR, "logs")
+PYCACHE_DIR  = os.path.join(LOGS_DIR, "pycache")
+VERSION_FILE = os.path.join(MISC_DIR, "versions.json")
+ENV_PATH     = os.path.join(MISC_DIR, ".env")
+
+# Embedded interpreter path for backwards compatibility
+INTERPRETER = os.path.join(RESOURCE_DIR, "embedded_python", "python.exe")
 if not os.path.isfile(INTERPRETER):
     INTERPRETER = sys.executable
 
-BRANCH = 'main'
+BRANCH = "main"
 
-
-LOGS_DIR    = os.path.join(APP_DIR, 'logs')
-PYCACHE_DIR = os.path.join(LOGS_DIR, 'pycache')
-
+# Ensure required directories exist
 os.makedirs(MISC_DIR, exist_ok=True)
-VERSION_FILE = os.path.join(MISC_DIR, "versions.json")
-os.makedirs(PYCACHE_DIR, exist_ok=True)
-os.environ['PYTHONPYCACHEPREFIX'] = PYCACHE_DIR
 os.makedirs(LOGS_DIR, exist_ok=True)
-# ────────────────────────────────────────────────────────────────────────────────
+os.makedirs(PYCACHE_DIR, exist_ok=True)
+os.makedirs(BIN_DIR, exist_ok=True)
+
+# Set Python cache prefix for compiled files
+os.environ["PYTHONPYCACHEPREFIX"] = PYCACHE_DIR
 
 if not os.path.exists(ENV_PATH):
     open(ENV_PATH, 'w').close()
 load_dotenv(ENV_PATH)
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") # Optional: Use a GitHub token for authenticated requests. When using the official Release, GitHub actions will automatically bundle a token.
 
 class App:
     def __init__(self, root):
@@ -213,12 +106,7 @@ class App:
 
         tk.Label(root, text='Select a program to run:').pack(pady=(10, 0))
 
-        labels = [
-            "Run Assigner",
-            "Run Scraper",
-            "Run Spreader",
-            "Run Tasks"
-        ]
+        labels = [v.get('label') for v in APPS.values() if v.get('label') is not None] # Loads labels from the APPS dict, filtering out any without a label.
 
         for label in labels:
             btn = tk.Button(root, text=label, width=25,
@@ -290,16 +178,9 @@ def run_job(label) -> str:
             break
     else:
         return f"[Error] Unknown label: {label}"
-
-    # 2) Build paths
-    app_dir = (
-        os.path.dirname(sys.executable)
-        if getattr(sys, "frozen", False)
-        else os.path.dirname(__file__)
-    )
-    bin_dir = os.path.join(app_dir, "bin")
-    exe_name = f"{app_name}.exe"
-    exe_path = os.path.join(bin_dir, exe_name)
+    
+    # 2) Determine exe path
+    exe_path = os.path.join(BIN_DIR, f"{app_name}.exe")
 
     # 3) Load version cache
     versions = load_versions()
@@ -309,16 +190,15 @@ def run_job(label) -> str:
     if not os.path.isfile(exe_path):
         tag, url = get_latest_release_info(app_name)
         if tag and url:
-            os.makedirs(bin_dir, exist_ok=True)
             if download_update(url, exe_path):
-                print(f"[Download] {exe_name} v{tag} → {exe_path}")
+                print(f"[Download] {app_name} v{tag} → {exe_path}")
                 downloaded_tag = tag
                 versions[app_name] = tag
                 save_versions(versions)
             else:
-                return f"[Download] Failed to download {exe_name}"
+                return f"[Download] Failed to download {app_name}"
         else:
-            return f"[Download] No {exe_name} asset found for {app_name}"
+            return f"[Download] No .exe asset found for {app_name}"
 
     # 5) Determine current_version
     if downloaded_tag:
@@ -338,25 +218,30 @@ def run_job(label) -> str:
             if latest_tag and latest_tag != current_version:
                 versions[app_name] = latest_tag
                 save_versions(versions)
-            return f"[Update] {exe_name} replaced and launched"
+            return f"[Update] {app_name} replaced and launched"
     else:
-        print(f"[Update] Could not determine version for {exe_name}, skipping update.")
+        print(f"[Update] Could not determine version for {app_name}, skipping update.")
 
     # 7) Normal launch (only if no update was performed)
     try:
-        subprocess.Popen([exe_path], cwd=app_dir)
-        return f"[Launch] {exe_name} started"
+        subprocess.Popen([exe_path], cwd=APP_DIR)
+        return f"{app_name} started, please wait for GUI to appear."
     except Exception as e:
-        return f"[Launch] Failed to run {exe_name}: {e}"
+        return f"[Launch] Failed to run {app_name}: {e}"
 
-def get_child_version(exe_path, timeout=30):
-    """
-    Run `exe_path --version` and return the version string.
-    If it fails or exe is missing, return None.
-    """
+def get_child_version(exe_path, timeout=30) -> str:
     if not os.path.isfile(exe_path):
         print(f"[Version] Executable not found: {exe_path}")
         return None
+
+    if VERSION_FILE and os.path.exists(VERSION_FILE):
+        cached_versions = load_versions()
+        key = os.path.basename(exe_path).replace('.exe', '')
+        cached_version = cached_versions.get(key)
+        if cached_version:
+            return cached_version
+        # No cached version for this exe, fall through to subprocess
+
     try:
         result = subprocess.run(
             [exe_path, "--version"],
@@ -370,14 +255,122 @@ def get_child_version(exe_path, timeout=30):
             return version
         else:
             print(f"[Version] Non-zero exit from {exe_path} --version: {result.returncode}")
-            return None
     except Exception as e:
         print(f"[Version] Error getting version from {exe_path}: {e}")
-        return None
+
+    return None
+
+def get_latest_release_info(app_name: str):
+    """
+    Given an app_name (e.g. 'ASSigner' or 'CalendarBuddy'),
+    look up its GitHub repo in APPS (or use the launcher repo if missing),
+    then fetch /releases/latest and return (tag, download_url) or None, None if not found.
+    """
+    owner, repo = APPS.get(app_name, {}).get('repo', (GITHUB_OWNER, GITHUB_REPO))
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    headers = {}
+    token = os.getenv("GITHUB_TOKEN")
+    if token: # Use token if available for authenticated requests (Optional)
+        headers["Authorization"] = f"token {token}"
+
+    resp = requests.get(url, headers=headers, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    tag_name = data.get("tag_name")
+
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        base, ext = os.path.splitext(name)
+        if ext.lower() == ".exe" and base.lower().startswith(app_name.lower()):
+            return tag_name, asset["browser_download_url"]
+
+    return None, None
+
+def download_update(url, dest_path):
+    try:
+        with requests.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            with open(dest_path, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
+        return True
+    except Exception as e:
+        print(f"[Update] Failed to download update: {e}")
+        return False
+
+def ensure_updater_installed():
+    updater_path = os.path.join(BIN_DIR, "Updater.exe")
+    if not os.path.isfile(updater_path):
+        tag, url = get_latest_release_info("Updater")
+        if tag and url:
+            if download_update(url, updater_path):
+                print(f"[Setup] Updater.exe v{tag} installed")
+            else:
+                print("[Setup] Failed to download Updater.exe")
+        else:
+            print("[Setup] No Updater.exe asset found")
+
+def maybe_update(app_name, current_version, is_launcher=False) -> bool:
+    """
+    Returns True if an update was performed (and Updater.exe was run),
+    False otherwise.
+    """
+    latest_version, download_url = get_latest_release_info(app_name)
+    if not latest_version or not download_url:
+        print(f"[Update] Could not find latest release info for {app_name}")
+        return False
+
+    def norm_ver(v): return v.lstrip('vV')
+    if norm_ver(latest_version) <= norm_ver(current_version):
+        print(f"[No Update] {app_name} is up to date ({current_version})")
+        return False
+
+    print(f"[Update] {app_name} update available: {current_version} → {latest_version}")
+
+    app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(__file__)
+    bin_folder = os.path.join(app_dir, "bin")
+    os.makedirs(bin_folder, exist_ok=True)
+
+    # paths for old/new exe
+    if is_launcher:
+        old_exe = os.path.join(app_dir, f"{app_name}.exe")
+        new_exe = os.path.join(app_dir, f"{app_name}_update.exe")
+    else:
+        old_exe = os.path.join(bin_folder, f"{app_name}.exe")
+        new_exe = os.path.join(bin_folder, f"{app_name}_update.exe")
+
+    updater = os.path.join(bin_folder, "Updater.exe")
+
+    # download the update
+    if not download_update(download_url, new_exe):
+        print("[Update] Failed to download update")
+        return False
+
+    print(f"[Update] Downloaded new version to {new_exe}")
+    if not os.path.exists(updater):
+        print(f"[Update] Updater.exe not found in {bin_folder}, cannot update now.")
+        return False
+
+    if is_launcher:
+        # launcher: fire-and-exit so the file lock is released
+        print(f"[Update] Launching Updater.exe to replace {old_exe}")
+        subprocess.Popen([updater, old_exe, new_exe], cwd=bin_folder)
+        print("[Update] Exiting launcher to allow update")
+        sys.exit(0)
+    else:
+        # child: run updater synchronously and then return True
+        try:
+            print(f"[Update] Launching Updater.exe to replace {old_exe}")
+            subprocess.run([updater, old_exe, new_exe], cwd=bin_folder, check=True)
+            print(f"[Update] Replacement complete for {app_name}")
+            return True
+        except Exception as e:
+            print(f"[Update] Error running Updater.exe: {e}")
+            return False
 
 
 if __name__ == '__main__':
-    ensure_updater_installed(BIN_DIR)
+    ensure_updater_installed() # This is what is triggering the Security Warning on every launch... (Fix would be to sign the exe, but that requires a code signing certificate)
     maybe_update('CalendarBuddy', __version__, True)
     root = tk.Tk()
     App(root)

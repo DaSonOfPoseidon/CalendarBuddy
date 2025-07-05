@@ -9,9 +9,6 @@ permissions:
   contents: write
   actions: write
 
-env:
-  EXE_REPO: DaSonOfPoseidon/exeFiles
-
 jobs:
   build:
     runs-on: windows-latest
@@ -40,9 +37,13 @@ jobs:
 
       - name: Build CalendarBuddy executable
         run: pyinstaller CalendarBuddy.spec
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Updater executable
         run: pyinstaller updater.spec
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push git tag (if not exists)
         shell: bash
@@ -68,44 +69,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload CalendarBuddy EXE to release
+      - name: Upload EXEs to release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.VERSION }}
-          files: dist/CalendarBuddy.exe
+          files: dist/CalendarBuddy.exe, dist/updater.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Updater EXE to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ env.VERSION }}
-          files: dist/updater.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger exeFiles update for CalendarBuddy
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.PAT }}
-          repository: ${{ env.EXE_REPO }}
-          event-type: exe_update
-          client-payload: |
-            {
-              "exe_name": "CalendarBuddy.exe",
-              "version": "${{ env.VERSION }}",
-              "release_repo": "CalendarBuddy"
-            }
-
-      - name: Trigger exeFiles update for Updater
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.PAT }}
-          repository: ${{ env.EXE_REPO }}
-          event-type: exe_update
-          client-payload: |
-            {
-              "exe_name": "updater.exe",
-              "version": "${{ env.VERSION }}",
-              "release_repo": "CalendarBuddy"
-            }
